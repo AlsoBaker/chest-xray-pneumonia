@@ -17,12 +17,12 @@ const NORMAL_POOL = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => ({
   name: `Normal sample ${n}`,
 }))
 
-// Test-set performance (mirrors backend/model_utils.py)
+// Test-set performance from the README (EfficientNetB4 + TTA); the API response overrides these
 const DEFAULT_METRICS = {
-  accuracy: 90.54,
-  roc_auc: 0.9663,
-  sensitivity: 94.62,
-  specificity: 83.76,
+  accuracy: 93.59,
+  roc_auc: 0.9834,
+  sensitivity: 94.36,
+  specificity: 92.31,
 }
 
 // Always pick 2 pneumonia + 2 normal, then shuffle the order
@@ -253,7 +253,7 @@ export default function App() {
             <div className="intro" key="intro">
               <h1 className="headline">See where the model looks.</h1>
               <p className="lede">
-                Upload a frontal chest X-ray. A DenseNet121 network trained on 5,863 scans says
+                Upload a frontal chest X-ray. An EfficientNetB4 network trained on 5,863 scans says
                 whether it shows signs of pneumonia, and a Grad-CAM heatmap shows which regions
                 drove that call.
               </p>
