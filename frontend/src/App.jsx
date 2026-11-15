@@ -207,14 +207,22 @@ export default function App() {
           <span className="brand-mark" aria-hidden="true" />
           Pneumonia X-ray reader
         </span>
-        <a
-          className="topbar-link"
-          href="https://github.com/AlsoBaker/chest-xray-pneumonia-detection"
-          target="_blank"
-          rel="noreferrer"
-        >
-          Source on GitHub
-        </a>
+        <div className="topbar-right">
+          <a
+            className="topbar-link"
+            href="https://github.com/AlsoBaker/chest-xray-pneumonia-detection"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Source on GitHub
+          </a>
+          <p className="credit">
+            Made by Vijayesh <span aria-hidden="true">|</span>{" "}
+            <a href="https://github.com/AlsoBaker" target="_blank" rel="noreferrer" translate="no">
+              AlsoBaker
+            </a>
+          </p>
+        </div>
       </header>
 
       <main className="stage">
