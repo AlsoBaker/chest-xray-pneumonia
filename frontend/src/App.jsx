@@ -187,7 +187,9 @@ export default function App() {
     viewer = (
       <div className="empty">
         <svg className="empty-icon" viewBox="0 0 64 64" aria-hidden="true">
-          <path d="M32 8v20M32 28c-4 6-14 4-18 14-3 8 0 14 6 14s8-6 8-14M32 28c4 6 14 4 18 14 3 8 0 14-6 14s-8-6-8-14" />
+          <path className="lobe" d="M27 14C18 15 9 29 8.5 45C8.3 52 12 56 18.5 55L25 54C27 53.6 28.5 52 28.5 49.5V16.5C28.5 15 28 14 27 14Z" />
+          <path className="lobe" d="M37 14C46 15 55 29 55.5 45C55.7 52 52 56 45.5 55L39 54C37 53.6 35.5 52 35.5 49.5V16.5C35.5 15 36 14 37 14Z" />
+          <path className="airway" d="M32 4V24M32 24C32 28 29 30 22 33M32 24C32 28 35 30 42 33M22 33L17 39M22 33L21.5 44M42 33L47 39M42 33L42.5 44" />
         </svg>
         <p className="empty-title">Drop a chest X-ray here</p>
         <p className="empty-sub">PNG or JPEG, frontal view</p>

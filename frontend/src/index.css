@@ -195,15 +195,24 @@ button { font: inherit; color: inherit; touch-action: manipulation; -webkit-tap-
 }
 
 .empty-icon {
-  width: 64px;
-  height: 64px;
-  margin-bottom: 0.75rem;
-  fill: none;
-  stroke: #1d3354;
-  stroke-width: 2.5;
+  width: 76px;
+  height: 76px;
+  margin-bottom: 0.9rem;
+  overflow: visible;
   stroke-linecap: round;
   stroke-linejoin: round;
-  opacity: 0.75;
+}
+
+.empty-icon .lobe {
+  fill: rgba(29, 51, 84, 0.08);
+  stroke: #1d3354;
+  stroke-width: 2.5;
+}
+
+.empty-icon .airway {
+  fill: none;
+  stroke: #1d3354;
+  stroke-width: 1.75;
 }
 
 .empty-title {
