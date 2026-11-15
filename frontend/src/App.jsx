@@ -1,98 +1,143 @@
-import { useState, useRef, useMemo } from "react"
+import { useState, useRef, useMemo, useEffect } from "react"
 import axios from "axios"
 import "./index.css"
 
+const API_URL = "https://vijayesh684-chest-xray-api.hf.space/predict"
+
 // ── Pool of images stored in public/samples/ (all .jpeg) ──
-const PNEUMONIA_POOL = [
-  { label: "PNEUMONIA", path: "/samples/pneumonia1.jpeg",  name: "Pneumonia Sample 1"  },
-  { label: "PNEUMONIA", path: "/samples/pneumonia2.jpeg",  name: "Pneumonia Sample 2"  },
-  { label: "PNEUMONIA", path: "/samples/pneumonia3.jpeg",  name: "Pneumonia Sample 3"  },
-  { label: "PNEUMONIA", path: "/samples/pneumonia5.jpeg",  name: "Pneumonia Sample 5"  },
-  { label: "PNEUMONIA", path: "/samples/pneumonia6.jpeg",  name: "Pneumonia Sample 6"  },
-  { label: "PNEUMONIA", path: "/samples/pneumonia7.jpeg",  name: "Pneumonia Sample 7"  },
-  { label: "PNEUMONIA", path: "/samples/pneumonia8.jpeg",  name: "Pneumonia Sample 8"  },
-  { label: "PNEUMONIA", path: "/samples/pneumonia9.jpeg",  name: "Pneumonia Sample 9"  },
-  { label: "PNEUMONIA", path: "/samples/pneumonia10.jpeg", name: "Pneumonia Sample 10" },
-]
+const PNEUMONIA_POOL = [1, 2, 3, 5, 6, 7, 8, 9, 10].map((n) => ({
+  label: "PNEUMONIA",
+  path: `/samples/pneumonia${n}.jpeg`,
+  name: `Pneumonia sample ${n}`,
+}))
 
-const NORMAL_POOL = [
-  { label: "NORMAL", path: "/samples/normal1.jpeg",  name: "Normal Sample 1"  },
-  { label: "NORMAL", path: "/samples/normal2.jpeg",  name: "Normal Sample 2"  },
-  { label: "NORMAL", path: "/samples/normal3.jpeg",  name: "Normal Sample 3"  },
-  { label: "NORMAL", path: "/samples/normal4.jpeg",  name: "Normal Sample 4"  },
-  { label: "NORMAL", path: "/samples/normal5.jpeg",  name: "Normal Sample 5"  },
-  { label: "NORMAL", path: "/samples/normal6.jpeg",  name: "Normal Sample 6"  },
-  { label: "NORMAL", path: "/samples/normal7.jpeg",  name: "Normal Sample 7"  },
-  { label: "NORMAL", path: "/samples/normal8.jpeg",  name: "Normal Sample 8"  },
-  { label: "NORMAL", path: "/samples/normal9.jpeg",  name: "Normal Sample 9"  },
-  { label: "NORMAL", path: "/samples/normal10.jpeg", name: "Normal Sample 10" },
-]
+const NORMAL_POOL = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => ({
+  label: "NORMAL",
+  path: `/samples/normal${n}.jpeg`,
+  name: `Normal sample ${n}`,
+}))
 
-// Always pick 2 pneumonia + 2 normal — guaranteed balance
+// Test-set performance (mirrors backend/model_utils.py)
+const DEFAULT_METRICS = {
+  accuracy: 90.54,
+  roc_auc: 0.9663,
+  sensitivity: 94.62,
+  specificity: 83.76,
+}
+
+// Always pick 2 pneumonia + 2 normal, then shuffle the order
 function pickBalanced() {
-  const shuffle = (arr) => [...arr].sort(() => Math.random() - 0.5)
-  return [...shuffle(PNEUMONIA_POOL).slice(0, 2), ...shuffle(NORMAL_POOL).slice(0, 2)]
+  const shuffle = (arr) => {
+    const a = [...arr]
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[a[i], a[j]] = [a[j], a[i]]
+    }
+    return a
+  }
+  return shuffle([...shuffle(PNEUMONIA_POOL).slice(0, 2), ...shuffle(NORMAL_POOL).slice(0, 2)])
+}
+
+const prefersReducedMotion = () =>
+  typeof window !== "undefined" &&
+  window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+
+// Animates a number from 0 to `target` once `target` is set
+function useCountUp(target, duration = 1100) {
+  const [value, setValue] = useState(0)
+  useEffect(() => {
+    if (target == null) return
+    const ms = prefersReducedMotion() ? 0 : duration
+    let raf
+    const start = performance.now()
+    const tick = (now) => {
+      const t = ms ? Math.min(1, (now - start) / ms) : 1
+      const eased = 1 - Math.pow(1 - t, 3)
+      setValue(target * eased)
+      if (t < 1) raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [target, duration])
+  return value
 }
 
 export default function App() {
   const [file, setFile]         = useState(null)
   const [preview, setPreview]   = useState(null)
+  const [activeSample, setActiveSample] = useState(null)
   const [result, setResult]     = useState(null)
-  const [loading, setLoading]   = useState(false)
+  const [status, setStatus]     = useState("idle") // idle | loading | analyzing
+  const [error, setError]       = useState(null)
   const [dragging, setDragging] = useState(false)
+  const [split, setSplit]       = useState(50)
   const inputRef                = useRef(null)
 
-  // 2 pneumonia + 2 normal, randomised once per page load
   const displayedSamples = useMemo(() => pickBalanced(), [])
+  const metrics = result?.metrics ?? DEFAULT_METRICS
+  const confidence = useCountUp(result ? Number(result.confidence) : null)
+  const isPneumonia = result?.label === "PNEUMONIA"
+  const busy = status !== "idle"
+
+  // Release object URLs when the preview changes
+  useEffect(() => () => preview && URL.revokeObjectURL(preview), [preview])
 
   // ── File handling ──────────────────────────────────────────
-  const handleFile = (f) => {
+  const takeFile = (f, sampleName = null) => {
     if (!f) return
-    setFile(f)
+    if (!/\.(png|jpe?g)$/i.test(f.name)) {
+      setError("That file isn't a PNG or JPEG. Choose a chest X-ray image in one of those formats.")
+      return
+    }
+    setError(null)
     setResult(null)
+    setSplit(50)
+    setFile(f)
+    setActiveSample(sampleName)
     setPreview(URL.createObjectURL(f))
   }
 
   const handleDrop = (e) => {
     e.preventDefault()
     setDragging(false)
-    handleFile(e.dataTransfer.files[0])
+    if (!busy) takeFile(e.dataTransfer.files[0])
   }
 
-  // ── Load sample image (local public/ files — no CORS issues) ──
   const loadSample = async (sample) => {
-    setResult(null)
-    setLoading(true)
+    setStatus("loading")
+    setError(null)
     try {
       const res = await fetch(sample.path)
-      if (!res.ok) throw new Error(`Image not found (${res.status}): ${sample.path}`)
+      if (!res.ok) throw new Error(`the image at ${sample.path} returned ${res.status}`)
       const blob = await res.blob()
-      const f    = new File([blob], sample.name + ".jpg", { type: "image/jpeg" })
-      setFile(f)
-      setPreview(URL.createObjectURL(blob))
+      takeFile(new File([blob], sample.name + ".jpg", { type: "image/jpeg" }), sample.name)
     } catch (err) {
-      alert("Failed to load sample: " + err.message)
+      setError(`Couldn't load the sample: ${err.message}.`)
     } finally {
-      setLoading(false)
+      setStatus("idle")
     }
   }
 
   // ── API call ───────────────────────────────────────────────
   const analyze = async () => {
     if (!file) return
-    setLoading(true)
+    setStatus("analyzing")
+    setError(null)
     try {
       const formData = new FormData()
       formData.append("file", file)
-      const res = await axios.post(
-        "https://vijayesh684-chest-xray-api.hf.space/predict",
-        formData
-      )
+      const res = await axios.post(API_URL, formData)
       setResult(res.data)
     } catch (err) {
-      alert("Error: " + (err.response?.data?.error || err.message))
+      const code = err.response?.status
+      if (code === 503 || code === 502) {
+        setError("The model server is asleep or restarting. Wait a minute, then select Analyze X-ray again.")
+      } else {
+        const reason = err.response?.data?.error || err.message
+        setError(`The analysis didn't finish (${reason}). Check your connection and try again.`)
+      }
     } finally {
-      setLoading(false)
+      setStatus("idle")
     }
   }
 
@@ -100,173 +145,220 @@ export default function App() {
     setFile(null)
     setPreview(null)
     setResult(null)
+    setActiveSample(null)
+    setError(null)
+  }
+
+  const openPicker = () => inputRef.current?.click()
+
+  // ── Lightbox contents ──────────────────────────────────────
+  let viewer
+  if (result) {
+    viewer = (
+      <div className="compare" style={{ "--split": `${split}%` }}>
+        <img src={result.original} alt="Original chest X-ray" className="compare-img" />
+        <img
+          src={result.gradcam}
+          alt="Grad-CAM heatmap over the X-ray"
+          className="compare-img compare-heat"
+        />
+        <div className="compare-handle" aria-hidden="true" />
+        <input
+          type="range"
+          className="compare-range"
+          min="0"
+          max="100"
+          value={split}
+          onChange={(e) => setSplit(Number(e.target.value))}
+          aria-label="Drag to compare the original X-ray with the heatmap"
+        />
+        <span className="compare-tag compare-tag-left">Original</span>
+        <span className="compare-tag compare-tag-right">Heatmap</span>
+      </div>
+    )
+  } else if (preview) {
+    viewer = (
+      <div className={`film ${status === "analyzing" ? "is-scanning" : ""}`}>
+        <img src={preview} alt={activeSample ?? "Your uploaded X-ray"} />
+        <div className="scanline" aria-hidden="true" />
+      </div>
+    )
+  } else {
+    viewer = (
+      <div className="empty">
+        <svg className="empty-icon" viewBox="0 0 64 64" aria-hidden="true">
+          <path d="M32 8v20M32 28c-4 6-14 4-18 14-3 8 0 14 6 14s8-6 8-14M32 28c4 6 14 4 18 14 3 8 0 14-6 14s-8-6-8-14" />
+        </svg>
+        <p className="empty-title">Drop a chest X-ray here</p>
+        <p className="empty-sub">PNG or JPEG, frontal view</p>
+        <button type="button" className="btn btn-dark" onClick={openPicker}>
+          Choose an X-ray
+        </button>
+      </div>
+    )
   }
 
   return (
     <div className="app">
-      {/* ── Header ── */}
-      <div className="header">
-        <h1>🫁 Chest X-Ray Diagnosis</h1>
-        <p>AI-powered pneumonia detection using EfficientNetB4 + Grad-CAM</p>
-      </div>
+      <header className="topbar">
+        <span className="brand">
+          <span className="brand-mark" aria-hidden="true" />
+          Pneumonia X-ray reader
+        </span>
+        <a
+          className="topbar-link"
+          href="https://github.com/AlsoBaker/chest-xray-pneumonia-detection"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Source on GitHub
+        </a>
+      </header>
 
-      {/* ── Warning ── */}
-      <div className="warning">
-        ⚠️ For research purposes only. Not a substitute for professional medical diagnosis.
-      </div>
-
-      <div className="main-layout">
-        {/* ── Main Content (LEFT) ── */}
-        <div className="main-content">
-          {/* Upload Zone */}
-          {!result && (
-            <div
-              className={`upload-zone ${dragging ? "dragging" : ""}`}
-              onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
-              onDragLeave={() => setDragging(false)}
-              onDrop={handleDrop}
-              onClick={() => inputRef.current.click()}
-            >
-              <input
-                ref={inputRef}
-                type="file"
-                accept=".png,.jpg,.jpeg"
-                style={{ display: "none" }}
-                onChange={(e) => handleFile(e.target.files[0])}
-              />
-              {preview ? (
-                <>
-                  <img
-                    src={preview}
-                    alt="preview"
-                    style={{ maxHeight: 220, borderRadius: 10, marginBottom: "1rem" }}
-                  />
-                  <p style={{ color: "#94a3b8" }}>{file?.name}</p>
-                </>
-              ) : (
-                <>
-                  <div className="icon">🩻</div>
-                  <h3>Drop your chest X-ray here</h3>
-                  <p>or click a sample on the right</p>
-                  <p style={{ fontSize: "0.8rem", color: "#64748b" }}>Supports PNG, JPG, JPEG</p>
-                </>
-              )}
-              <button
-                className="upload-btn"
-                onClick={(e) => { e.stopPropagation(); inputRef.current.click() }}
-              >
-                {preview ? "Change Image" : "Browse File"}
-              </button>
-            </div>
-          )}
-
-          {/* Analyze Button */}
-          {file && !result && !loading && (
-            <button
-              className="upload-btn"
-              style={{ width: "100%", padding: "0.85rem", fontSize: "1rem", marginBottom: "1.5rem" }}
-              onClick={analyze}
-            >
-              🔍 Analyze X-Ray
-            </button>
-          )}
-
-          {/* Loading */}
-          {loading && (
-            <div className="loading">
-              <div className="spinner" />
-              <p style={{ color: "#64748b" }}>Analyzing X-ray with EfficientNetB4...</p>
-            </div>
-          )}
-
-          {/* Results */}
+      <main className="stage">
+        {/* ── Lightbox (hero) ── */}
+        <section
+          className={`lightbox ${dragging ? "is-dragging" : ""} ${result ? "has-result" : ""}`}
+          onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={handleDrop}
+          aria-label="X-ray viewer"
+        >
+          <div className="lightbox-panel">{viewer}</div>
           {result && (
-            <>
-              <div className="results-grid">
-                {/* Prediction Card */}
-                <div className="card">
-                  <h3>Diagnosis Result</h3>
-                  <div className={`result-label ${result.label.toLowerCase()}`}>
-                    {result.label === "PNEUMONIA" ? "🔴" : "🟢"} {result.label}
-                  </div>
-                  <div className="confidence-bar-wrap">
-                    <div
-                      className={`confidence-bar ${result.label.toLowerCase()}`}
-                      style={{ width: `${result.confidence}%` }}
-                    />
-                  </div>
-                  <div className="confidence-text">
-                    Confidence: <span>{result.confidence}%</span>
-                  </div>
-                  <div style={{ marginTop: "1rem", fontSize: "0.85rem", color: "#64748b" }}>
-                    <div>Raw score: {result.score}</div>
-                    <div>Threshold: {result.threshold}</div>
-                  </div>
-                </div>
-
-                {/* Metrics Card */}
-                <div className="card">
-                  <h3>Model Performance</h3>
-                  <div className="metrics-grid">
-                    <div className="metric-item">
-                      <div className="metric-value">{result.metrics.accuracy}%</div>
-                      <div className="metric-label">Accuracy</div>
-                    </div>
-                    <div className="metric-item">
-                      <div className="metric-value">{result.metrics.roc_auc}</div>
-                      <div className="metric-label">ROC-AUC</div>
-                    </div>
-                    <div className="metric-item">
-                      <div className="metric-value">{result.metrics.sensitivity}%</div>
-                      <div className="metric-label">Sensitivity</div>
-                    </div>
-                    <div className="metric-item">
-                      <div className="metric-value">{result.metrics.specificity}%</div>
-                      <div className="metric-label">Specificity</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Images */}
-              <div className="image-grid">
-                <div className="card image-card">
-                  <h3>Original X-Ray</h3>
-                  <img src={result.original} alt="original xray" />
-                </div>
-                <div className="card image-card">
-                  <h3>Grad-CAM Heatmap</h3>
-                  <img src={result.gradcam} alt="gradcam heatmap" />
-                </div>
-              </div>
-
-              {/* Reset */}
-              <button className="reset-btn" onClick={reset}>
-                🔄 Analyze Another X-Ray
-              </button>
-            </>
+            <div className="legend">
+              <span>Less attention</span>
+              <span className="legend-ramp" aria-hidden="true" />
+              <span>More attention</span>
+            </div>
           )}
-        </div>
+          {status === "analyzing" && (
+            <p className="lightbox-caption">
+              Reading the X-ray… The first run can take up to a minute while the server wakes up.
+            </p>
+          )}
+        </section>
 
-        {/* ── Sample Images Panel (RIGHT) ── */}
-        <div className="sample-panel">
-          <h3 className="sample-title">Try a Sample</h3>
-          <p className="sample-subtitle">Click any image to load it</p>
-          <div className="sample-grid">
-            {displayedSamples.map((sample, i) => (
-              <div
-                key={i}
-                className={`sample-card ${sample.label.toLowerCase()}`}
-                onClick={() => loadSample(sample)}
-              >
-                <img src={sample.path} alt={sample.name} />
-                <div className="sample-badge">{sample.label}</div>
-                <div className="sample-name">{sample.name}</div>
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".png,.jpg,.jpeg"
+          hidden
+          onChange={(e) => { takeFile(e.target.files[0]); e.target.value = "" }}
+        />
+
+        {/* ── Control column ── */}
+        <section className="panel">
+          {!result ? (
+            <div className="intro" key="intro">
+              <h1 className="headline">See where the model looks.</h1>
+              <p className="lede">
+                Upload a frontal chest X-ray. A DenseNet121 network trained on 5,863 scans says
+                whether it shows signs of pneumonia, and a Grad-CAM heatmap shows which regions
+                drove that call.
+              </p>
+
+              <div className="actions">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={analyze}
+                  disabled={!file || busy}
+                >
+                  {status === "analyzing" ? "Analyzing…" : "Analyze X-ray"}
+                </button>
+                <button type="button" className="btn btn-ghost" onClick={openPicker} disabled={busy}>
+                  {file ? "Choose a different image" : "Upload your own"}
+                </button>
               </div>
-            ))}
-          </div>
-        </div>
-      </div>
+
+              <div className="samples">
+                <p className="samples-title">Or try a sample from the test set</p>
+                <ul className="sample-grid">
+                  {displayedSamples.map((sample) => (
+                    <li key={sample.path}>
+                      <button
+                        type="button"
+                        className={`sample ${sample.label.toLowerCase()} ${
+                          activeSample === sample.name ? "is-active" : ""
+                        }`}
+                        onClick={() => loadSample(sample)}
+                        disabled={busy}
+                        aria-pressed={activeSample === sample.name}
+                      >
+                        <img src={sample.path} alt="" width="160" height="160" />
+                        <span className="sample-tag">
+                          {sample.label === "PNEUMONIA" ? "Pneumonia" : "Normal"}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          ) : (
+            <div className={`verdict ${isPneumonia ? "pneumonia" : "normal"}`} key="verdict">
+              <h1 className="verdict-label">
+                {isPneumonia ? "Signs of pneumonia" : "No signs of pneumonia"}
+              </h1>
+
+              <div className="meter">
+                <div className="meter-head">
+                  <span>Model confidence</span>
+                  <span className="meter-value">{confidence.toFixed(1)}%</span>
+                </div>
+                <div className="meter-track">
+                  <div className="meter-fill" style={{ width: `${result.confidence}%` }} />
+                </div>
+              </div>
+
+              <p className="verdict-detail">
+                The model scored this image <strong>{result.score}</strong>. Anything above{" "}
+                <strong>{result.threshold}</strong> is read as pneumonia.
+                {activeSample && (
+                  <> This sample is labelled <strong>{activeSample.startsWith("Pneumonia") ? "pneumonia" : "normal"}</strong> in the dataset.</>
+                )}
+              </p>
+
+              <p className="verdict-hint">
+                Drag across the image to compare the original with the heatmap.
+              </p>
+
+              <button type="button" className="btn btn-primary" onClick={reset}>
+                Analyze another X-ray
+              </button>
+            </div>
+          )}
+
+          {error && (
+            <p className="error" role="alert">
+              {error}
+            </p>
+          )}
+        </section>
+      </main>
+
+      {/* Persistent live region so screen readers hear progress and results */}
+      <p className="sr-only" aria-live="polite">
+        {status === "analyzing"
+          ? "Analyzing the X-ray."
+          : result
+            ? `${isPneumonia ? "Signs of pneumonia" : "No signs of pneumonia"}, ${result.confidence}% confidence.`
+            : ""}
+      </p>
+
+      <footer className="footnote">
+        <dl className="stats" aria-label="Model performance on the held-out test set">
+          <div><dt>Accuracy</dt><dd>{metrics.accuracy}%</dd></div>
+          <div><dt>Sensitivity</dt><dd>{metrics.sensitivity}%</dd></div>
+          <div><dt>Specificity</dt><dd>{metrics.specificity}%</dd></div>
+          <div><dt>ROC-AUC</dt><dd>{metrics.roc_auc}</dd></div>
+        </dl>
+        <p className="disclaimer">
+          Measured on the held-out test set. This is a research project, not a medical device.
+          Talk to a clinician about any X-ray that matters.
+        </p>
+      </footer>
     </div>
   )
 }
