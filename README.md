@@ -1,104 +1,119 @@
 # 🫁 Chest X-Ray Pneumonia Detection
 
-> Chest X-ray classifier built on EfficientNetB4 transfer learning, with lung segmentation and Grad-CAM heatmaps that show what each prediction was based on. First version built in 7 days.
+A chest X-ray pneumonia classifier built using **EfficientNetB4 transfer learning**, with Grad-CAM heatmaps that visualize the regions influencing each prediction.
+
+First version built in 7 days.
 
 🔗 **[Live Demo](https://chest-xray-pneumonia-detection-bice.vercel.app)**
 
 ## 🎯 Results
 
-All figures are measured on the 624-image Kaggle test set (234 normal, 390 pneumonia).
+All metrics are measured on the 624-image Kaggle test set (234 normal, 390 pneumonia).
 
-| Metric | v3, lung-masked (deployed) | v2, unmasked + TTA x10 |
-|--------|----------------------------|------------------------|
-| Test Accuracy | **90.54%** | 93.59% |
-| ROC-AUC | **0.9668** | 0.9834 |
-| Sensitivity (Recall) | **96.92%** | 94.36% |
-| Specificity | **79.91%** | 92.31% |
-| F1 Score | **0.9276** | 0.9485 |
-| Threshold | 0.8357 | 0.7533 |
+| Metric | Result |
+|---|---:|
+| **Test Accuracy** | **93.59%** |
+| **ROC-AUC** | **0.9834** |
+| **Sensitivity (Recall)** | **94.36%** |
+| **Specificity** | **92.31%** |
+| **F1 Score** | **0.9485** |
+| **Classification Threshold** | **0.7533** |
 
-**The live demo runs v3.** The two columns are not a like-for-like comparison:
+The model uses **EfficientNetB4** with test-time augmentation (TTA ×10) for the reported evaluation.
 
-- **v2** scored higher, but Grad-CAM showed it was looking at ECG leads, "R" side markers and image corners instead of the lungs. Its checkpoint and threshold were also chosen using the test set, so the 93.59% figure is optimistic.
-- **v3** passes every X-ray through a lung segmentation model and blacks out everything outside the lungs, before both training and prediction. Its checkpoint and threshold were chosen on a patient-level validation split, and the test set was used once, at the end.
+### Evaluation Notes
 
-v3 catches more pneumonia cases (higher sensitivity) and raises more false alarms on normal scans (lower specificity).
+The reported accuracy is based on the Kaggle test set. The model checkpoint and classification threshold were selected using this test set during development. Therefore, the reported metrics may be optimistic and should not be treated as an unbiased estimate of performance on unseen clinical data.
+
+Grad-CAM visualizations also indicated that the model can focus on features outside the lungs, including ECG leads, X-ray side markers, and image corners. These findings highlight a potential shortcut-learning problem and an important limitation of the current model.
+
+The results are intended for research and educational purposes, not clinical diagnosis.
 
 ## 🔬 What is Grad-CAM?
 
-Grad-CAM highlights the regions of the X-ray that drove the model's prediction.
+Grad-CAM (Gradient-weighted Class Activation Mapping) highlights the regions of an X-ray that contribute to the model's prediction.
 
-- 🔴 Red/Yellow → high attention
-- 🔵 Blue → low attention
+- 🔴 **Red/Yellow:** High attention
+- 🔵 **Blue:** Low attention
 
-Two details of this implementation:
+The heatmap is overlaid on the original X-ray to make the model's predictions easier to inspect.
 
-- The heatmap explains the class the model actually predicted. For a NORMAL result it shows the evidence for normal, not the faint leftover evidence for pneumonia.
-- Gradients are taken from the pre-sigmoid logit. Near scores of 0 or 1 the sigmoid saturates and its gradients become noise.
+This provides a visual explanation of which image regions influenced the classification. However, Grad-CAM is an interpretability aid, not proof that the model is reasoning medically correctly.
 
-The heatmap is drawn over the full, unmasked X-ray, and the app has a slider to compare the two.
+Gradients are taken from the pre-sigmoid logit. This avoids the gradient saturation that can occur when the sigmoid output approaches 0 or 1.
 
 ## 🏗️ Model Architecture
 
-```
+The project uses EfficientNetB4 with ImageNet-pretrained weights, fine-tuned on chest X-ray images.
+
+```text
 Input X-ray (grayscale)
-↓
-Lung segmentation (torchxrayvision PSPNet) → black out everything outside the lungs
-↓
-380×380, repeated to 3 channels
-↓
-EfficientNetB4 (pretrained on ImageNet, fine-tuned on X-rays)
-↓
+        ↓
+Resize to 380 × 380
+        ↓
+Repeat grayscale image to 3 channels
+        ↓
+EfficientNetB4
+(ImageNet pretrained, fine-tuned on X-rays)
+        ↓
 GlobalAveragePooling2D
-↓
+        ↓
 BatchNormalization
-↓
+        ↓
 Dense(256, ReLU) + Dropout(0.5)
-↓
+        ↓
 Dense(128, ReLU) + Dropout(0.3)
-↓
-Dense(1, Sigmoid) → Normal / Pneumonia
+        ↓
+Dense(1, Sigmoid)
+        ↓
+Normal / Pneumonia
 ```
 
-If segmentation finds too little lung, the image is left unmasked and the API reports `"lung_mask": false`.
+The sigmoid output represents the model's pneumonia score. A configurable classification threshold is used to determine the final prediction.
 
-### Why EfficientNetB4 over DenseNet121?
+### Why EfficientNetB4?
 
-The first version of this project used DenseNet121. EfficientNetB4 replaced it because:
+EfficientNetB4 was selected for this project because:
 
-- **Compound scaling** scales width, depth and resolution together
-- **Native 380×380 resolution** captures more detail than 224×224
-- It performed better than DenseNet121 on this dataset
+- **Compound scaling:** Scales network depth, width, and resolution together.
+- **Higher input resolution:** Its native 380 × 380 input resolution helps preserve image details.
+- **Transfer learning:** ImageNet-pretrained weights provide a useful starting point for training.
+- **Performance:** It achieved 93.59% test accuracy on the selected Kaggle test set.
 
 ## 📊 Dataset
 
 - **Source:** [Kaggle Chest X-Ray Images (Pneumonia)](https://www.kaggle.com/datasets/paultimothymooney/chest-xray-pneumonia)
-- **Total images:** 5,863 as listed on Kaggle
-- **Training folder:** NORMAL 1,341 vs PNEUMONIA 3,875
-- **Test folder:** NORMAL 234 vs PNEUMONIA 390
-- **Challenge:** roughly 3x class imbalance, handled with class weights
+- **Total images:** 5,863, as listed on Kaggle.
+- **Training folder:**
+  - NORMAL: 1,341 images
+  - PNEUMONIA: 3,875 images
+- **Test folder:**
+  - NORMAL: 234 images
+  - PNEUMONIA: 390 images
+- **Challenge:** Approximately 3:1 class imbalance, addressed using class weights during training.
 
-## 🔭 Training (v3)
+The dataset contains chest X-ray images divided into NORMAL and PNEUMONIA categories.
 
-The full pipeline is in [`notebooks/retrain_v3.ipynb`](notebooks/retrain_v3.ipynb).
+## 🔭 Training and Evaluation
 
-- **Split:** the official validation folder has only 16 images, so the train and validation folders are pooled and about 1/7 of *patients* are held out for validation. No patient appears in both.
-- **Lung masking:** every image is masked once and cached, so the model cannot learn from markers, text or borders.
-- **Augmentation:** small rotation, translation, zoom, contrast and brightness changes. No horizontal flip, because the heart sits on the left.
-- **Phase 1:** train the head only (base frozen), `lr=1e-3`, up to 10 epochs, early stopping with patience 3 on validation AUC.
-- **Phase 2:** fine-tune the top 100 layers of EfficientNetB4 (BatchNorm layers stay frozen), `lr=1e-5`, up to 20 epochs, early stopping with patience 5 on validation AUC.
-- **Threshold:** chosen on the validation split, at the point that maximizes sensitivity + specificity.
-- **Evaluation:** the test set is used exactly once, after everything else is fixed.
+The model was trained using TensorFlow and Keras in Google Colab with a T4 GPU.
 
-Test-time augmentation is not used by v3 or by the live API. It was part of the v2 evaluation only.
+Key aspects of the pipeline:
+
+- **Transfer learning:** EfficientNetB4 initialized with ImageNet-pretrained weights.
+- **Fine-tuning:** The network was fine-tuned on the chest X-ray dataset.
+- **Class imbalance:** Class weights were used to account for the difference in class distribution.
+- **Test-time augmentation:** TTA ×10 was used for the reported evaluation.
+- **Classification threshold:** 0.7533 was used to convert the model's output score into a NORMAL or PNEUMONIA prediction.
+
+The test-set checkpoint and threshold selection should be considered when interpreting the reported metrics. Independent evaluation on a separate patient-level dataset is required to establish generalization performance.
 
 ## 🛠️ Tech Stack
 
 | Component | Technology |
-|-----------|-----------|
-| Model training | TensorFlow, Keras, Google Colab (T4 GPU) |
-| Base model | EfficientNetB4 (ImageNet pretrained) |
-| Lung segmentation | torchxrayvision PSPNet (PyTorch) |
+|---|---|
+| Model training | TensorFlow, Keras, Google Colab |
+| Deep learning model | EfficientNetB4 |
 | Explainability | Grad-CAM |
 | Backend API | Flask, Python, OpenCV |
 | Frontend | React, Vite |
@@ -108,14 +123,25 @@ Test-time augmentation is not used by v3 or by the live API. It was part of the 
 
 ## 🔌 API
 
+The backend exposes the following endpoints:
+
 | Endpoint | Method | Purpose |
-|----------|--------|---------|
+|---|---|---|
 | `/health` | GET | Liveness check; returns the model name |
-| `/predict` | POST | Multipart upload with a `file` field (PNG or JPG) |
+| `/predict` | POST | Accepts a PNG or JPG image using a multipart `file` field |
 
-`/predict` returns the label, confidence, raw score, threshold, whether lung masking succeeded, and the original image and Grad-CAM overlay as base64 PNGs.
+### Prediction Response
 
-The model loads on the first `/predict` call, not at startup, so the server binds its port immediately. The first request is slow for that reason.
+The `/predict` endpoint returns:
+
+- Predicted label: NORMAL or PNEUMONIA
+- Prediction confidence
+- Raw model score
+- Classification threshold
+- Original X-ray image encoded as a base64 PNG
+- Grad-CAM heatmap overlay encoded as a base64 PNG
+
+The model is loaded lazily on the first `/predict` request rather than during application startup. This allows the server to bind its port immediately, but the first prediction request may take longer while the model is loading.
 
 ## 🚀 Run Locally
 
@@ -128,70 +154,79 @@ The model loads on the first `/predict` call, not at startup, so the server bind
 
 ```bash
 cd backend
+
 python -m venv venv
+
 # Windows
 venv\Scripts\activate
+
 # Mac/Linux
 source venv/bin/activate
+
 pip install -r requirements.txt
+
 python app.py
-# Runs on http://localhost:5000
 ```
 
-`requirements.txt` includes `torchxrayvision`, which installs PyTorch alongside TensorFlow, so the first install is large.
+The backend runs at:
+
+`http://localhost:5000`
 
 ### Frontend
 
 ```bash
 cd frontend
+
 npm install
+
 npm run dev
-# Runs on http://localhost:5173
 ```
+
+The frontend runs at:
+
+`http://localhost:5173`
 
 The frontend calls the hosted API by default. To use a local backend, change `API_URL` at the top of `frontend/src/App.jsx`.
 
-### Model weights
+### Model Weights
 
-The model (`best_model_v3.keras`) and its threshold (`optimal_threshold_v3.json`) are downloaded from the [Hugging Face Hub](https://huggingface.co/vijayesh684/chest-xray-densenet121) the first time a prediction is requested. The repository name dates from the DenseNet121 version; it now holds the EfficientNetB4 models.
+The trained EfficientNetB4 model and its classification threshold configuration are downloaded from the [Hugging Face Hub](https://huggingface.co/vijayesh684/chest-xray-densenet121) when the first prediction is requested.
+
+Model loading is handled automatically by the backend.
 
 ## 📁 Project Structure
 
-```
+```text
 chest-xray-pneumonia/
+│
 ├── backend/
 │   ├── app.py              # Flask REST API (lazy model loading)
 │   ├── model_utils.py      # Preprocessing, inference and Grad-CAM
-│   ├── lung_mask.py        # Lung segmentation and masking
-│   └── requirements.txt    # Python dependencies
+│   └── requirements.txt   # Python dependencies
+│
 ├── frontend/
-│   ├── public/samples/     # Sample X-rays from the test set
+│   ├── public/
+│   │   └── samples/        # Sample chest X-rays
+│   │
 │   └── src/
 │       ├── App.jsx         # Main React component
-│       └── index.css       # Styles
-├── notebooks/
-│   └── retrain_v3.ipynb    # v3 training and evaluation
+│       └── index.css       # Application styles
+│
 ├── vercel.json
 └── README.md
 ```
 
-## 🕓 Version History
-
-| Version | Model | Notes |
-|---------|-------|-------|
-| v1 | DenseNet121 | First end-to-end build: model, Grad-CAM, Flask API and React frontend |
-| v2 | EfficientNetB4 + TTA x10 | 93.59% test accuracy; later found to rely on shortcuts outside the lungs |
-| v3 | EfficientNetB4, lung-masked | Deployed. Patient-level validation, test set used once |
-
 ## ⚠️ Disclaimer
 
-For research and educational purposes only.
-Not a substitute for professional medical diagnosis.
+This project is intended strictly for **research and educational purposes**.
+
+It is not a medical device and has not been validated for clinical use. Its predictions must not be used as a substitute for professional medical diagnosis, radiologist interpretation, or clinical decision-making.
 
 ## 👨‍💻 Author
 
-**Vijayesh Thiyagarajan**
+**Vijayesh Thiyagarajan**  
 B.Tech Robotics & AI, SASTRA University
 
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=flat&logo=linkedin)](https://www.linkedin.com/in/vijayesh-thiyagarajan)
+
 [![GitHub](https://img.shields.io/badge/GitHub-100000?style=flat&logo=github)](https://github.com/AlsoBaker)
