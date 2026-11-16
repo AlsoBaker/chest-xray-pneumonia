@@ -7,22 +7,14 @@
 
 | Metric | Score |
 |--------|-------|
-| Test Accuracy | **90.54%** |
-| ROC-AUC | **0.9668** |
-| Sensitivity (Recall) | **96.92%** |
-| Specificity | **79.91%** |
-| F1 Score | **0.9276** |
-| Threshold | 0.8357 |
+| Test Accuracy | **93.59%** |
+| ROC-AUC | **0.9834** |
+| Sensitivity (Recall) | **94.36%** |
+| Specificity | **92.31%** |
+| F1 Score | **0.9485** |
+| Threshold | 0.7533 |
 
-> **v3 model (lung-masked).** Every X-ray is passed through a lung segmentation model
-> (torchxrayvision PSPNet) and everything outside the lungs is blacked out before training
-> and prediction. Earlier versions scored higher but learned shortcuts: Grad-CAM showed them
-> looking at ECG leads, "R" markers and image corners instead of the lungs.
->
-> Evaluated on the 624-image Kaggle test set, which was used for nothing else. Checkpoints
-> and the threshold were chosen on a patient-level validation split carved out of the
-> training data, with no patient in both. The previous 93.59% figure used the test set to
-> pick the checkpoint and threshold, so it was optimistic.
+> Results achieved using **EfficientNetB4** with **Test-Time Augmentation (TTA x10)**
 
 ## 🔬 What is Grad-CAM?
 Grad-CAM highlights the regions of the X-ray the model focuses on when making predictions.

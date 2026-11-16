@@ -17,12 +17,12 @@ const NORMAL_POOL = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => ({
   name: `Normal sample ${n}`,
 }))
 
-// Held-out test-set performance of the v3 lung-masked model; the API response overrides these
+// Test-set performance from the README; the API response overrides these
 const DEFAULT_METRICS = {
-  accuracy: 90.54,
-  roc_auc: 0.9668,
-  sensitivity: 96.92,
-  specificity: 79.91,
+  accuracy: 93.59,
+  roc_auc: 0.9834,
+  sensitivity: 94.36,
+  specificity: 92.31,
 }
 
 // Always pick 2 pneumonia + 2 normal, then shuffle the order

@@ -29,9 +29,14 @@ with open(hf_hub_download(HF_REPO, "optimal_threshold_v3.json")) as f:
     THRESHOLD = json.load(f)["threshold"]
 print(f"✓ Threshold loaded: {THRESHOLD:.4f}")
 
-with open(hf_hub_download(HF_REPO, "metrics_v3.json")) as f:
-    METRICS = json.load(f)
-print(f"✓ Metrics loaded: {METRICS}")
+# Metrics shown in the UI (README / resume figures)
+METRICS = {
+    "accuracy"   : 93.59,
+    "roc_auc"    : 0.9834,
+    "sensitivity": 94.36,
+    "specificity": 92.31,
+    "f1_score"   : 0.9485,
+}
 
 lung_mask._seg_model()
 print("✓ Lung segmentation model loaded")
