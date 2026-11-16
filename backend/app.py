@@ -22,7 +22,7 @@ def load_model_lazy():
 
 @app.route("/health", methods=["GET"])
 def health():
-    return {"status": "ok", "model": "DenseNet121"}
+    return {"status": "ok", "model": "EfficientNetB4 v3 (lung-masked)"}
 
 @app.route("/predict", methods=["POST"])
 def predict():

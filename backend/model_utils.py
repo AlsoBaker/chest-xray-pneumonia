@@ -1,9 +1,12 @@
 # ============================================================
 # model_utils.py
-# Handles model loading, inference, and Grad-CAM generation
+# Handles model loading, lung masking, inference, and Grad-CAM generation
+#
+# v3: the model was trained on lung-masked images (everything outside the
+# lungs blacked out), so every upload goes through the same lung_mask step
+# before prediction. The heatmap is drawn over the full, unmasked X-ray.
 # ============================================================
 
-import os
 import json
 import numpy as np
 import cv2
@@ -12,40 +15,49 @@ from tensorflow.keras.models import load_model
 from huggingface_hub import hf_hub_download
 import base64
 
-# ── Load model + threshold once at startup ─────────────────
-BASE_DIR       = os.path.dirname(os.path.abspath(__file__))
-THRESHOLD_PATH = os.path.join(BASE_DIR, "optimal_threshold.json")
+import lung_mask
 
+HF_REPO  = "vijayesh684/chest-xray-densenet121"
+IMG_SIZE = 380  # EfficientNetB4 native resolution
+
+# ── Load model, threshold, metrics and segmenter once at startup ─────
 print("Loading model from Hugging Face Hub...")
-MODEL_PATH = hf_hub_download(
-    repo_id="vijayesh684/chest-xray-densenet121",
-    filename="best_model_phase2.keras"
-)
-model = load_model(MODEL_PATH)
+model = load_model(hf_hub_download(HF_REPO, "best_model_v3.keras"))
 print("✓ Model loaded")
 
-with open(THRESHOLD_PATH) as f:
+with open(hf_hub_download(HF_REPO, "optimal_threshold_v3.json")) as f:
     THRESHOLD = json.load(f)["threshold"]
 print(f"✓ Threshold loaded: {THRESHOLD:.4f}")
 
-IMG_SIZE = 380  # EfficientNetB4 native resolution
+with open(hf_hub_download(HF_REPO, "metrics_v3.json")) as f:
+    METRICS = json.load(f)
+print(f"✓ Metrics loaded: {METRICS}")
+
+lung_mask._seg_model()
+print("✓ Lung segmentation model loaded")
 
 # ── Preprocessing ───────────────────────────────────────────
 def preprocess_image(img_bytes):
     """
-    Convert raw image bytes → normalized tensor
-    EfficientNet normalizes internally, no /255 needed
-    Returns: (original_rgb, preprocessed_batch)
+    Raw image bytes → (original_rgb, masked_batch, mask_ok)
+    original_rgb : full X-ray resized to IMG_SIZE, for display
+    masked_batch : lung-only image the model sees, [0, 255] float32
+                   (EfficientNet normalizes internally, no /255 needed)
+    mask_ok      : False if lung segmentation failed and the image was
+                   left unmasked
     """
-    nparr    = np.frombuffer(img_bytes, np.uint8)
-    img      = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    img      = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    original = cv2.resize(img, (IMG_SIZE, IMG_SIZE))
+    nparr = np.frombuffer(img_bytes, np.uint8)
+    gray  = cv2.imdecode(nparr, cv2.IMREAD_GRAYSCALE)
+    if gray is None:
+        raise ValueError("Could not read the image file")
 
-    # EfficientNet expects [0, 255] range
-    img_batch = np.expand_dims(original, 0).astype(np.float32)
+    masked, mask_ok = lung_mask.mask_xray(gray, IMG_SIZE)
+    original = cv2.cvtColor(
+        cv2.resize(gray, (IMG_SIZE, IMG_SIZE), interpolation=cv2.INTER_AREA),
+        cv2.COLOR_GRAY2RGB)
+    masked_batch = np.repeat(masked[None, ..., None], 3, axis=-1).astype(np.float32)
 
-    return original, img_batch
+    return original, masked_batch, mask_ok
 
 # ── Inference ───────────────────────────────────────────────
 def predict(img_batch):
@@ -136,26 +148,21 @@ def numpy_to_base64(img_array):
 # ── Main pipeline ───────────────────────────────────────────
 def analyze_xray(img_bytes):
     """
-    Full pipeline: bytes → prediction + Grad-CAM
+    Full pipeline: bytes → lung mask → prediction + Grad-CAM
     Returns dict with all results for React frontend
     """
-    original, img_batch      = preprocess_image(img_bytes)
-    score, label, confidence = predict(img_batch)
-    heatmap                  = get_gradcam_heatmap(img_batch, label == "PNEUMONIA")
-    superimposed             = overlay_gradcam(original, heatmap)
+    original, masked_batch, mask_ok = preprocess_image(img_bytes)
+    score, label, confidence        = predict(masked_batch)
+    heatmap                         = get_gradcam_heatmap(masked_batch, label == "PNEUMONIA")
+    superimposed                    = overlay_gradcam(original, heatmap)
 
     return {
         "label"      : label,
         "confidence" : round(confidence * 100, 2),
         "score"      : round(score, 4),
         "threshold"  : round(THRESHOLD, 4),
+        "lung_mask"  : bool(mask_ok),
         "original"   : numpy_to_base64(original),
         "gradcam"    : numpy_to_base64(superimposed),
-        "metrics"    : {
-            "accuracy"   : 93.59,
-            "roc_auc"    : 0.9834,
-            "sensitivity": 94.36,
-            "specificity": 92.31,
-            "f1_score"   : 0.9485
-        }
+        "metrics"    : METRICS,
     }
